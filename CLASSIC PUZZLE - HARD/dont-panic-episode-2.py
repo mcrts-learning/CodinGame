@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 from typing import DefaultDict, Iterable, MutableSet, Tuple, FrozenSet
 from dataclasses import dataclass, field
 from collections import Counter
 import heapq as hq
-
 import numpy as np
 
 WAIT = ("WAIT",)
@@ -82,17 +83,68 @@ class Graph:
     def add_edge(self, edge):
         self.edges.add(edge)
 
+    def remove_node(self, node):
+        self.nodes.remove(node)
+
+    def remove_edge(self, edge):
+        self.edges.remove(edge)
+
     def get_start(self):
         return next(filter(lambda n: self.node_properties[n].is_start, self.nodes))
 
     def get_exit(self):
         return next(filter(lambda n: self.node_properties[n].is_exit, self.nodes))
 
-    def get_out_edges(self, node):
+    def out_edges(self, node: Node) -> Iterable[Node]:
         return filter(lambda e: e.node_from == node, self.edges)
 
-    def get_in_edges(self, node):
+    def in_edges(self, node: Node) -> Iterable[Node]:
         return filter(lambda e: e.node_to == node, self.edges)
+
+    def graph_reduction(self):
+        end = self.get_exit()
+        for node in list(
+            filter(lambda n: n.position[0] >= end.position[0],
+            filter(lambda n: not(
+                self.node_properties[n].is_exit
+                or self.node_properties[n].is_start
+                or self.node_properties[n].can_exit
+                ), self.nodes))
+        ):
+            in_edges = list(self.in_edges(node))
+            out_edges = list(self.out_edges(node))
+            for e in out_edges:
+                self.remove_edge(e)
+            for e in in_edges:
+                self.remove_edge(e)
+            self.remove_node(node)
+
+        for node in list(filter(lambda n: n.label not in ("EXIT", "START"), self.nodes)):
+            in_edges = list(self.in_edges(node))
+            out_edges = list(self.out_edges(node))
+            if (len(in_edges) == 1 and len(out_edges) == 1):
+                in_edge = in_edges[0]
+                out_edge = out_edges[0]
+                edge = Edge(
+                    node_from=in_edge.node_from,
+                    node_to=out_edge.node_to,
+                    label=f"{in_edge.label} + {out_edge.label}",
+                    sequence=in_edge.sequence + out_edge.sequence
+                )
+                self.add_edge(edge)
+                self.remove_edge(in_edge)
+                self.remove_edge(out_edge)
+                self.remove_node(node)
+        
+        for node in list(filter(lambda n: n.label not in ("EXIT", "START"), self.nodes)):
+            in_edges = list(self.in_edges(node))
+            out_edges = list(self.out_edges(node))
+            if (len(in_edges) == 0 or len(out_edges) == 0):
+                for e in out_edges:
+                    self.remove_edge(e)
+                for e in in_edges:
+                    self.remove_edge(e)
+                self.remove_node(node)
 
 @dataclass
 class Factory:
@@ -193,7 +245,7 @@ class Factory:
         return graph
 
 @dataclass(frozen=True)
-class Path:
+class SolverPath:
     node: Node
     sequence: Tuple[str] = field(default_factory=tuple)
     nodes: FrozenSet[Node] = field(default_factory=frozenset)
@@ -207,18 +259,18 @@ class Path:
         counter = Counter(self.sequence)
         return self.time, counter['BLOCK'] + counter['ELEVATOR'], counter['ELEVATOR']
 
-    def __gt__(self, other):
+    def __gt__(self, other: SolverPath):
         return self.time > other.time
 
-    def append_edge(self, edge):
+    def append_edge(self, edge: Edge) -> SolverPath:
         node = edge.node_to
         sequence = self.sequence + edge.sequence
         nodes = self.nodes | set([node])
         return type(self)(node, sequence, nodes)
     
-    def get_childs(self, graph):
+    def get_childs(self, graph: Graph):
         childs = list()
-        for e in graph.get_out_edges(self.node):
+        for e in graph.out_edges(self.node):
             if e.node_to not in self.nodes:
                 childs.append(self.append_edge(e))
         return childs
@@ -233,19 +285,25 @@ class Solver:
     def cost(self):
         return self.time, self.clone, self.elevator
 
-    def check_cost(self, path):
+    def check_cost(self, path: SolverPath):
         return all([a <= b for a, b in zip(path.cost, self.cost)])
 
-    def bfs(self, graph, start, end):
+    def bfs(self, graph: Graph, start: Node, end: Node) -> Tuple[bool, SolverPath | None]:
         discovered = set()
         queue = list()
-        pstart = Path(start)
+        pstart = SolverPath(start)
         discovered.add(pstart)
         hq.heappush(queue, (pstart.time, pstart))
 
+        log_count = 0
         while queue:
             _, current = hq.heappop(queue)
-            if graph.node_properties[current.node].is_exit:
+
+            if log_count % 100 == 0:
+                print("LOG", f"iteration {log_count}, queue size {len(queue)}, current path {current.cost=}, {current.node.position=}", sep=" | ")
+            log_count += 1
+
+            if current.node == end:
                 return True, current
 
             for child in current.get_childs(graph):
@@ -255,27 +313,52 @@ class Solver:
 
         return False, None
 
-from pprint import pprint
-grid = np.flip(np.array([
-[" ", "X", " ", " ", " "],
-[" ", " ", " ", " ", " "],
-[" ", " ", " ", " ", " "],
-[" ", " ", " ", " ", " "],
-[" ", " ", " ", "O", " "],
-]), axis=0)
-time, clones, elevators = (1000, 20, 2)
-factory = Factory(time, clones, elevators)
+    def bfs2(self, graph: Graph, start: Node, end: Node) -> Tuple[bool, SolverPath | None]:
+        discovered = set()
+        queue = list()
+        pstart = SolverPath(start)
+        discovered.add(pstart)
+        hq.heappush(queue, (pstart.time + abs(end.position[0] - pstart.node.position[0]), pstart))
+
+        log_count = 0
+        while queue:
+            _, current = hq.heappop(queue)
+
+            if log_count % 100 == 0:
+                print("LOG", f"iteration {log_count}, queue size {len(queue)}, current path {current.cost=}, {current.node.position=}", sep=" | ")
+            log_count += 1
+
+            if current.node == end:
+                return True, current
+
+            for child in current.get_childs(graph):
+                if (child not in discovered and self.check_cost(child)):
+                    discovered.add(child)
+                    hq.heappush(queue, (child.time + 3*abs(end.position[0] - child.node.position[0]), child))
+
+        return False, None
+
+from dont_panic_maps import FEW_CLONES as loadmap
+grid, (height, width, time, exit_y, exit_x, n_clone, n_elevator, n_starting_elevator) = loadmap()
+
+factory = Factory(time, n_clone, n_elevator)
 graph = factory.parse_grid(grid)
-print(f"{time=} {clones=} {elevators=}")
+print(f"{time=} {n_clone=} {n_elevator=}")
+print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
+graph.graph_reduction()
+print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
+graph.graph_reduction()
+print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
+graph.graph_reduction()
+print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
+graph.graph_reduction()
 print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
 
-pprint([g for g in graph.nodes if len(list(graph.get_in_edges(g))) == 0])
-
-solver = Solver(time, clones, elevators)
+solver = Solver(time, n_clone, n_elevator)
 start = graph.get_start()
 end = graph.get_exit()
 print(start, end)
-success, path = solver.bfs(graph, start, end)
+success, path = solver.bfs2(graph, start, end)
 
 if success:
     print("Path found")
