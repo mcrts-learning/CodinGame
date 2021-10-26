@@ -2,6 +2,13 @@ from typing import Iterable
 import numpy as np
 
 INPUTS = {
+    "2 MISSING ELEVATORS": [
+        "6 13 100 5 1 10 2 3",
+        "4 1",
+        "0 4",
+        "2 7",
+        "0 10 RIGHT",
+    ],
     "TRAP": [
         "13 36 67 11 12 41 4 34",
         "6 34",
@@ -134,6 +141,26 @@ INPUTS = {
         "8 23",
         "6 57",
         "0 33 RIGHT",
+    ],
+    "BEST PATH MISSING ELEVATORS": [
+        "10 19 42 9 9 41 1 16",
+        "4 3",
+        "7 4",
+        "1 17",
+        "8 9",
+        "4 9",
+        "2 3",
+        "0 3",
+        "5 4",
+        "7 17",
+        "1 4",
+        "3 17",
+        "2 9",
+        "6 9",
+        "5 17",
+        "0 9",
+        "6 3",
+        "0 6 RIGHT",
     ]
 }
 
@@ -160,3 +187,17 @@ def BEST_PATH():
 
 def FEW_CLONES():
     return parse(iter(INPUTS["FEW CLONES"]))
+
+def TWO_MISSING_ELEVATOR():
+    return parse(iter(INPUTS["2 MISSING ELEVATORS"]))
+    
+def BEST_PATH_MISSING_ELEVATORS():
+    return parse(iter(INPUTS["BEST PATH MISSING ELEVATORS"]))
+    
+
+
+SOLUTIONS = {
+    "ELEVATOR": ('WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'ELEVATOR', 'WAIT', 'WAIT', 'WAIT', 'WAIT'),
+    "BEST PATH MISSING ELEVATORS": ('WAIT', 'WAIT', 'WAIT', 'WAIT', 'BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'ELEVATOR', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT'),
+    "GIANT MAP": ('BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'ELEVATOR', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'BLOCK', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'ELEVATOR', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'WAIT', 'ELEVATOR', 'WAIT', 'WAIT', 'WAIT', 'ELEVATOR', 'WAIT', 'WAIT', 'WAIT', 'WAIT'),
+}

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from collections import Counter
 import heapq as hq
 import numpy as np
+from numpy.lib.function_base import gradient
 
 WAIT = ("WAIT",)
 ELEVATOR = ("ELEVATOR",) + 3*WAIT
@@ -29,14 +30,12 @@ class Node:
 
 @dataclass
 class NodeProperties:
-    is_elevator: bool = False
-    is_exit: bool = False
     is_start: bool = False
-    can_walk: bool = False
-    can_block: bool = False
-    can_use_elevator: bool = False
-    can_put_elevator: bool = False
-    can_exit: bool = False
+    is_end: bool = False
+    is_elevator: bool = False
+    can_end: bool = False
+    is_in: bool = False
+    is_out: bool = False
 
     def __repr__(self):
         return f"""{self.__class__.__name__}({', '.join([f"{k}={v}" for k, v in self.__dict__.items() if v is True])})"""
@@ -46,7 +45,14 @@ class Edge:
     node_from: Node
     node_to: Node
     label: str = field(default="", compare=False)
-    sequence: Iterable[str] = field(default_factory=tuple, compare=False)
+    sequence: Iterable[str] = field(default_factory=tuple)
+
+    def __add__(self, other: Edge) -> Edge:
+        node_from = self.node_from
+        node_to = other.node_to
+        label = f"{self.label} {other.label}"
+        sequence = self.sequence + other.sequence
+        return type(self)(node_from, node_to, label, sequence)
 
     @classmethod
     def walk_edge(cls, n1, n2):
@@ -57,8 +63,8 @@ class Edge:
         return cls(n1, n2, "BLOCK", BLOCK + WAIT*abs(n1.x - n2.x))
     
     @classmethod
-    def exit_edge(cls, n1, n2):
-        return cls(n1, n2, "EXIT", WAIT)
+    def end_edge(cls, n1, n2):
+        return cls(n1, n2, "END", WAIT)
 
     @classmethod
     def use_elevator_edge(cls, n1, n2):
@@ -92,8 +98,8 @@ class Graph:
     def get_start(self):
         return next(filter(lambda n: self.node_properties[n].is_start, self.nodes))
 
-    def get_exit(self):
-        return next(filter(lambda n: self.node_properties[n].is_exit, self.nodes))
+    def get_end(self):
+        return next(filter(lambda n: self.node_properties[n].is_end, self.nodes))
 
     def out_edges(self, node: Node) -> Iterable[Node]:
         return filter(lambda e: e.node_from == node, self.edges)
@@ -106,7 +112,7 @@ class Graph:
         for node in list(
             filter(lambda n: n.position[0] >= end.position[0],
             filter(lambda n: not(
-                self.node_properties[n].is_exit
+                self.node_properties[n].is_end
                 or self.node_properties[n].is_start
                 or self.node_properties[n].can_exit
                 ), self.nodes))
@@ -153,89 +159,100 @@ class Factory:
     n_elevators: int
 
     def add_step_node(self, graph, node):
-        for i in range(0, self.n_elevators):
-            y = node.y - i - 1
+        for _ in range(1, self.n_elevators):
+            y = node.y - 1
+            if y <= 0:
+                continue
             n = Node((y, node.x, node.direction))
             graph.add_node(n)
-            graph.node_properties[n].can_put_elevator = True
-            if y != 0:
-                graph.node_properties[n].can_block = True
-                graph.node_properties[n].can_walk = True
-    
-    def add_exit_node(self, graph, y, x):
-        n = Node((y, x, 0), "EXIT")
-        graph.add_node(n)
-        graph.node_properties[n].is_exit = True
+            graph.node_properties[n].is_in = True
+            
+            edge = Edge.put_elevator_edge(n, node)
+            graph.add_edge(edge)
+            node = n
 
-        n1 = Node((y, x, 1), "EXIT PATH")
-        graph.add_node(n1)
-        graph.node_properties[n1].can_exit = True
-        self.add_step_node(graph, n1)
-        n2 = Node((y, x, -1), "EXIT PATH")
-        graph.add_node(n2)
-        graph.node_properties[n2].can_exit = True
-        self.add_step_node(graph, n2)
+    def add_end_node(self, graph, y, x):
+        end_node = Node((y, x, 0), "END")
+        graph.add_node(end_node)
+        graph.node_properties[end_node].is_end = True
+
+        n1 = Node((y, x, 1), "END PATH")
+        n2 = Node((y, x, -1), "END PATH")
+        for n in [n1, n2]:
+            graph.add_node(n)
+            graph.node_properties[n].is_in = True
+            graph.node_properties[n].can_end = True
+            e = Edge.end_edge(n, end_node)
+            graph.add_edge(e)
+            self.add_step_node(graph, n)
 
     def add_start_node(self, graph, y, x):
         n = Node((y, x, 1), "START")
         graph.add_node(n)
         graph.node_properties[n].is_start = True
-        graph.node_properties[n].can_block = True
-        graph.node_properties[n].can_walk = True
+        graph.node_properties[n].is_out = True
 
     def add_elevator_node(self, graph, y, x, d):
         n = Node((y, x, d), "ELEVATOR")
         graph.add_node(n)
         graph.node_properties[n].is_elevator = True
-        graph.node_properties[n].can_use_elevator = True
-        graph.node_properties[n].can_block = False
-        graph.node_properties[n].can_walk = False
-        graph.node_properties[n].can_put_elevator = False
+        graph.node_properties[n].is_in = True
 
         n_out = Node((y + 1, x, d))
         graph.add_node(n_out)
-        if not graph.node_properties[n_out].is_elevator:
-            graph.node_properties[n_out].can_block = True
-            graph.node_properties[n_out].can_walk = True
+        graph.node_properties[n_out].is_in = True
+        if not (graph.node_properties[n_out].is_elevator or graph.node_properties[n_out].can_end):
+            graph.node_properties[n_out].is_out = True
+        
+        edge = Edge.use_elevator_edge(n, n_out)
+        graph.add_edge(edge)
 
         self.add_step_node(graph, n)
         
 
-    def add_edges(self, graph):
-        n_exit = next(filter(lambda n: graph.node_properties[n].is_exit, graph.nodes))
-        for n in filter(lambda n: graph.node_properties[n].can_exit, graph.nodes):
-            edge = Edge.exit_edge(n, n_exit)
-            graph.add_edge(edge)
-
-        for n1 in filter(lambda n: graph.node_properties[n].can_walk, graph.nodes):
-            nodes = filter(lambda n: n1.y == n.y, graph.nodes)
-            nodes = filter(lambda n: n1.x * n1.direction < n.x * n1.direction and n1.direction == n.direction, nodes)
+    def add_edges(self, graph: Graph):
+        for n1 in filter(lambda n: graph.node_properties[n].is_out, graph.nodes):
+            nodes = filter(lambda n: graph.node_properties[n].is_in, graph.nodes)
+            nodes = filter(lambda n: n1.y + 1 == n.y, nodes)
+            nodes = filter(lambda n: n1.x * n1.direction <= n.x * n1.direction and n1.direction == n.direction, nodes)
+            nodes = filter(
+                lambda n: not any([graph.node_properties[Node((n1.y, x, n.direction))].is_elevator for x in range(n1.x, n.x, n.direction)]),
+                nodes
+            )
             for n2 in nodes:
-                edge = Edge.walk_edge(n1, n2)
-                graph.add_edge(edge)
+                n = Node((n1.y, n2.x, n2.direction), "ELEVATOR")
+                e1 = Edge.walk_edge(n1, n)
+                if graph.node_properties[n].is_elevator:
+                    e2 = Edge.use_elevator_edge(n, n2)
+                else:
+                    e2 = Edge.put_elevator_edge(n, n2)
+                e = e1 + e2
+                graph.add_edge(e)
 
-        for n1 in filter(lambda n: graph.node_properties[n].can_block, graph.nodes):
-            nodes = filter(lambda n: n1.y == n.y, graph.nodes)
-            nodes = filter(lambda n: n1.x * n1.direction > n.x * n1.direction and n1.direction != n.direction, nodes)
-            for n2 in nodes:
-                edge = Edge.block_edge(n1, n2)
-                graph.add_edge(edge)
         
-        for n1 in filter(lambda n: graph.node_properties[n].can_use_elevator, graph.nodes):
-            n2 = next(filter(lambda n: n.position == (n1.y + 1, n1.x, n1.direction), graph.nodes))
-            edge = Edge.use_elevator_edge(n1, n2)
-            graph.add_edge(edge)
-
-        for n1 in filter(lambda n: graph.node_properties[n].can_put_elevator, graph.nodes):
-            n2 = next(filter(lambda n: n.position == (n1.y + 1, n1.x, n1.direction), graph.nodes))
-            edge = Edge.put_elevator_edge(n1, n2)
-            graph.add_edge(edge)
+        for n1 in filter(lambda n: graph.node_properties[n].is_out, graph.nodes):
+            nodes = filter(lambda n: graph.node_properties[n].is_in, graph.nodes)
+            nodes = filter(lambda n: n1.y + 1 == n.y, nodes)
+            nodes = filter(lambda n: n1.x * n1.direction > n.x * n1.direction and n1.direction != n.direction, nodes)
+            nodes = filter(
+                lambda n: not any([graph.node_properties[Node((n1.y, x, n.direction))].is_elevator for x in range(n1.x, n.x, n.direction)]),
+                nodes
+            )
+            for n2 in nodes:
+                n = Node((n1.y, n2.x, n2.direction), "ELEVATOR")
+                e1 = Edge.block_edge(n1, n)
+                if graph.node_properties[n].is_elevator:
+                    e2 = Edge.use_elevator_edge(n, n2)
+                else:
+                    e2 = Edge.put_elevator_edge(n, n2)
+                e = e1 + e2
+                graph.add_edge(e)
 
     def parse_grid(self, grid):
         graph = Graph()
         for (y, x), value in sorted(np.ndenumerate(grid), reverse=True):
             if value == 'X':
-                self.add_exit_node(graph, y, x)
+                self.add_end_node(graph, y, x)
             if value == 'O':
                 self.add_start_node(graph, y, x)
             if value == '^':
@@ -243,6 +260,7 @@ class Factory:
                 self.add_elevator_node(graph, y, x, -1)
         self.add_edges(graph)
         return graph
+
 
 @dataclass(frozen=True)
 class SolverPath:
@@ -295,14 +313,8 @@ class Solver:
         discovered.add(pstart)
         hq.heappush(queue, (pstart.time, pstart))
 
-        log_count = 0
         while queue:
             _, current = hq.heappop(queue)
-
-            if log_count % 100 == 0:
-                print("LOG", f"iteration {log_count}, queue size {len(queue)}, current path {current.cost=}, {current.node.position=}", sep=" | ")
-            log_count += 1
-
             if current.node == end:
                 return True, current
 
@@ -313,52 +325,30 @@ class Solver:
 
         return False, None
 
-    def bfs2(self, graph: Graph, start: Node, end: Node) -> Tuple[bool, SolverPath | None]:
-        discovered = set()
-        queue = list()
-        pstart = SolverPath(start)
-        discovered.add(pstart)
-        hq.heappush(queue, (pstart.time + abs(end.position[0] - pstart.node.position[0]), pstart))
+from dont_panic_maps import BEST_PATH_MISSING_ELEVATORS as loadmap
+from pprint import pprint
 
-        log_count = 0
-        while queue:
-            _, current = hq.heappop(queue)
-
-            if log_count % 100 == 0:
-                print("LOG", f"iteration {log_count}, queue size {len(queue)}, current path {current.cost=}, {current.node.position=}", sep=" | ")
-            log_count += 1
-
-            if current.node == end:
-                return True, current
-
-            for child in current.get_childs(graph):
-                if (child not in discovered and self.check_cost(child)):
-                    discovered.add(child)
-                    hq.heappush(queue, (child.time + 3*abs(end.position[0] - child.node.position[0]), child))
-
-        return False, None
-
-from dont_panic_maps import FEW_CLONES as loadmap
 grid, (height, width, time, exit_y, exit_x, n_clone, n_elevator, n_starting_elevator) = loadmap()
 
 factory = Factory(time, n_clone, n_elevator)
 graph = factory.parse_grid(grid)
-print(f"{time=} {n_clone=} {n_elevator=}")
-print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
-graph.graph_reduction()
-print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
-graph.graph_reduction()
-print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
-graph.graph_reduction()
-print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
-graph.graph_reduction()
-print(f"Nodes {len(graph.nodes)} Edges {len(graph.edges)}")
-
-solver = Solver(time, n_clone, n_elevator)
 start = graph.get_start()
-end = graph.get_exit()
+end = graph.get_end()
+
+
+n1 = Node((3, 3, -1))
+n2 = Node((4, 3, -1))
+
+print(n1, graph.node_properties[n1])
+print(n2, graph.node_properties[n2])
+pprint(set(graph.out_edges(n1)))
+
+
+#import sys; sys.exit()
+solver = Solver(time, n_clone, n_elevator)
+
 print(start, end)
-success, path = solver.bfs2(graph, start, end)
+success, path = solver.bfs(graph, start, end)
 
 if success:
     print("Path found")
